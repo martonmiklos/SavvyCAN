@@ -5012,7 +5012,7 @@ bool FrameFileIO::loadWiresharkFile(QString filename, QVector<CANFrame>* frames)
     int lineCounter = 0;
     bool foundErrors = false;
     pcap_pkthdr    packetHeader;
-	const char     *packetData = NULL;
+    const quint8     *packetData = NULL;
 	char errbuf[PCAP_ERRBUF_SIZE];
 
     thisFrame.setFrameType(QCanBusFrame::DataFrame);
@@ -5024,7 +5024,7 @@ bool FrameFileIO::loadWiresharkFile(QString filename, QVector<CANFrame>* frames)
 		return false;
 	}
 
-    packetData = (const char*)pcap_next(pcap_data_file, &packetHeader);
+    packetData = (const quint8*)pcap_next(pcap_data_file, &packetHeader);
 
     while (packetData) {
         lineCounter++;
@@ -5046,21 +5046,25 @@ bool FrameFileIO::loadWiresharkFile(QString filename, QVector<CANFrame>* frames)
         thisFrame.isReceived = true; // TODO: check if tx detection is possible
             
         thisFrame.setFrameType(QCanBusFrame::DataFrame);
-        thisFrame.setFrameId((0xff & *(packetData+17)) << 8 | (0xff & *(packetData+16)));
-        if (thisFrame.frameId() <= 0x7FF) thisFrame.setExtendedFrameFormat(false);
-            else thisFrame.setExtendedFrameFormat(true);
+
+        // SocketCAN pcap dump format: https://www.tcpdump.org/linktypes/LINKTYPE_CAN_SOCKETCAN.html
+        thisFrame.setFrameId((packetData[17] << 8) | (packetData[16]));
+        thisFrame.setExtendedFrameFormat(packetData[19] & 0x80);
+        if (packetData[19] & 0x80) {
+            // copy over the extended frame ID parts
+            thisFrame.setFrameId(thisFrame.frameId() | ((packetData[19] & 0x1F) << 24) | (packetData[18] << 16));
+        }
         thisFrame.bus = 0;
-        int numBytes = *(packetData+20);
+        int numBytes = packetData[20];
         QByteArray bytes(numBytes, 0);
         if (thisFrame.payload().length() > 8) thisFrame.payload().resize(8);
-        for (int d = 0; d < numBytes; d++) 
-        { 
-            bytes[d] = *(packetData + 24 + d);
+        for (int d = 0; d < numBytes; d++) {
+            bytes[d] = packetData[24 + d];
         }
         thisFrame.setPayload(bytes);
         frames->append(thisFrame);
 
-        packetData = (const char*)pcap_next(pcap_data_file, &packetHeader);
+        packetData = (const quint8*)pcap_next(pcap_data_file, &packetHeader);
     }
 
     pcap_close(pcap_data_file);
