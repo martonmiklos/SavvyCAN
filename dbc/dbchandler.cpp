@@ -507,11 +507,6 @@ DBC_SIGNAL* DBCFile::parseSignalLine(QString line, DBC_MESSAGE *msg)
     //bool isMultiplexed = false;
     DBC_SIGNAL sig;
 
-    sig.multiplexLowValue = 0;
-    sig.multiplexHighValue = 0;
-    sig.isMultiplexed = false;
-    sig.isMultiplexor = false;
-
     qDebug() << "Found a SG line";
     regex.setPattern("^SG\\_ *([-\\w]+) +M *: *(\\d+)\\|(\\d+)@(\\d+)([\\+|\\-]) \\(([0-9.+\\-eE]+),([0-9.+\\-eE]+)\\) \\[([0-9.+\\-eE]+)\\|([0-9.+\\-eE]+)\\] \\\"(.*)\\\" (.*)");
 
@@ -529,10 +524,7 @@ DBC_SIGNAL* DBCFile::parseSignalLine(QString line, DBC_MESSAGE *msg)
         if (match.hasMatch())
         {
             qDebug() << "Multiplexed signal";
-            //isMultiplexed = true;
-            sig.isMultiplexed = true;
-            sig.multiplexLowValue = match.captured(2).toInt();
-            sig.multiplexHighValue = sig.multiplexLowValue;
+            sig.addMultiplexRange(match.captured(2).toInt(), match.captured(2).toInt());
             offset = 1;
         }
         else
@@ -543,9 +535,7 @@ DBC_SIGNAL* DBCFile::parseSignalLine(QString line, DBC_MESSAGE *msg)
             {
                 qDebug() << "Extended Multiplexor Signal";
                 sig.isMultiplexor = true; //we don't set the local isMessageMultiplexor variable because this isn't the top level multiplexor
-                sig.isMultiplexed = true; //but, it is both a multiplexor and multiplexed
-                sig.multiplexLowValue = match.captured(2).toInt();
-                sig.multiplexHighValue = sig.multiplexLowValue;
+                sig.addMultiplexRange(match.captured(2).toInt(), match.captured(2).toInt());
                 offset = 1;
             }
             else
@@ -672,11 +662,10 @@ bool DBCFile::parseSignalMultiplexValueLine(QString line)
                         }
                         int rangeMin = rangeSides.at(0).toInt();
                         int rangeMax = rangeSides.at(1).toInt();
-                        parentSignal->multiplexedChildren.append(thisSignal);
                         thisSignal->multiplexParent = parentSignal;
-                        thisSignal->multiplexLowValue = rangeMin;
-                        thisSignal->multiplexHighValue = rangeMax;
+                        thisSignal->addMultiplexRange(rangeMin, rangeMax);
                     }
+                    parentSignal->multiplexedChildren.append(thisSignal);
                     return true;
                 }
             }
@@ -1469,7 +1458,7 @@ bool DBCFile::saveFile(QString fileName)
             }
             //check for the two telltale signs that we've got extended multiplexing going on.
             if (sig->isMultiplexed && sig->isMultiplexor) hasExtendedMultiplexing = true;
-            if (sig->multiplexLowValue != sig->multiplexHighValue) hasExtendedMultiplexing = true;
+            if (sig->hasExtendedMultiplexing) hasExtendedMultiplexing = true;
 
             msgOutput.append(" : " + QString::number(sig->startBit) + "|" + QString::number(sig->signalSize) + "@");
 
@@ -1636,7 +1625,7 @@ bool DBCFile::saveFile(QString fileName)
                 {
                     msgOutput.append("SG_MUL_VAL_ " + QString::number(ID) + " ");
                     msgOutput.append(sig->name + " " + sig->multiplexParent->name + " ");
-                    msgOutput.append(QString::number(sig->multiplexLowValue) + "-" + QString::number(sig->multiplexHighValue) + ";");
+                    msgOutput.append(sig->multiplexDbcString() + ";");
                     msgOutput.append("\n");
                     extMultiplexOutput.append(msgOutput);
                     msgOutput.clear(); //got to reset it after writing
@@ -2053,14 +2042,7 @@ DBCFile* DBCHandler::loadJSONFile(QString filename)
                 if (!sigObj.find("mux_id")->isUndefined())
                 {
                     QJsonValue muxVal = sigObj.find("mux_id").value();
-                    sig.multiplexLowValue = muxVal.toInt();
-                    sig.multiplexHighValue = sig.multiplexLowValue;
-                    sig.isMultiplexed = true;
-                }
-                else
-                {
-                    sig.multiplexLowValue = 0;
-                    sig.multiplexHighValue = 0;
+                    sig.addMultiplexRange(muxVal.toInt(), muxVal.toInt());
                 }
                 QJsonValue muxerVal = sigObj.find("is_muxer").value();
                 if (!muxerVal.isNull())
